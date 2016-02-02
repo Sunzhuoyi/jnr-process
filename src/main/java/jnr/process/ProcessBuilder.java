@@ -5,10 +5,9 @@ import jnr.posix.POSIXFactory;
 import jnr.posix.SpawnAttribute;
 import jnr.posix.SpawnFileAction;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -17,6 +16,9 @@ import java.util.Map;
  */
 public class ProcessBuilder {
     private List<String> command;
+    private File dir = new File(".");
+    private boolean isRedirectErrorStream = false;
+
     private static final POSIX posix = POSIXFactory.getPOSIX();
 
     public ProcessBuilder(List<String> command) {
@@ -41,7 +43,29 @@ public class ProcessBuilder {
         return this;
     }
 
+    public File directory() {
+        return dir.getAbsoluteFile();
+    }
+
+    public ProcessBuilder directory(File dir) {
+        this.dir = dir.getAbsoluteFile();
+        return this;
+    }
+
+    public boolean redirectErrorStream() {
+        return isRedirectErrorStream;
+    }
+
+    public ProcessBuilder redirectErrorStream(Boolean redirectErrorStream) {
+        isRedirectErrorStream = redirectErrorStream;
+        return this;
+    }
+
     public Process start() {
+        posix.chdir(dir.getAbsolutePath());
+
+        List<SpawnFileAction> actions;
+
         int[] stdin = new int[2];
         int[] stdout = new int[2];
         int[] stderr = new int[2];
@@ -49,7 +73,24 @@ public class ProcessBuilder {
         // prepare all pipes
         posix.pipe(stdin);
         posix.pipe(stdout);
-        posix.pipe(stderr);
+        if(!isRedirectErrorStream) {
+            posix.pipe(stderr);
+            actions = Arrays.asList(
+                    SpawnFileAction.dup(stdin[0], 0),
+                    SpawnFileAction.dup(stdout[1], 1),
+                    SpawnFileAction.dup(stderr[1], 2),
+                    SpawnFileAction.close(stdin[1]),
+                    SpawnFileAction.close(stdout[0]),
+                    SpawnFileAction.close(stderr[0]));
+        } else {
+            actions = Arrays.asList(
+                    SpawnFileAction.dup(stdin[0], 0),
+                    SpawnFileAction.dup(stdout[1], 1),
+                    SpawnFileAction.dup(stdout[1], 2),
+                    SpawnFileAction.close(stdin[1]),
+                    SpawnFileAction.close(stdout[0]));
+        }
+
 
         // build env list
         ArrayList<String> envp = new ArrayList<String>();
@@ -57,23 +98,24 @@ public class ProcessBuilder {
             envp.add(entry.getKey() + "=" + entry.getValue());
         }
 
+        List<SpawnAttribute> attributes = Arrays.asList(SpawnAttribute.pgroup(0),
+                SpawnAttribute.flags((short) SpawnAttribute.SETPGROUP));
+
         // spawn process, closing parent's descriptors in child
         long pid = posix.posix_spawnp(
                 command.get(0),
-                Arrays.asList(
-                        SpawnFileAction.dup(stdin[0], 0),
-                        SpawnFileAction.dup(stdout[1], 1),
-                        SpawnFileAction.dup(stderr[1], 2),
-                        SpawnFileAction.close(stdin[1]),
-                        SpawnFileAction.close(stdout[0]),
-                        SpawnFileAction.close(stderr[0])),
+                actions,
+                attributes,
                 command,
                 envp);
 
         // close child's descriptors in parent
         posix.close(stdin[0]);
         posix.close(stdout[1]);
-        posix.close(stderr[1]);
+        if(!isRedirectErrorStream) {
+            posix.close(stderr[1]);
+        }
+
 
         // construct a Process
         return new Process(posix, pid, stdin[1], stdout[0], stderr[0]);
