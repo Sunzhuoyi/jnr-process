@@ -116,6 +116,9 @@ public class ProcessBuilder {
             posix.close(stderr[1]);
         }
 
+        if (pid <= 0) {
+            throw new RuntimeException("can not spawn sub process");
+        }
 
         // construct a Process
         return new Process(posix, pid, stdin[1], stdout[0], stderr[0]);

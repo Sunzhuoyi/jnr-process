@@ -12,8 +12,6 @@ import java.io.OutputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.SelectableChannel;
 import java.nio.channels.SelectionKey;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -28,7 +26,6 @@ public class Process extends java.lang.Process {
     private final NativeDeviceChannel err; // stderr of child
     long exitcode = -1;
 
-    private final ScheduledExecutorService sched = Executors.newSingleThreadScheduledExecutor();
 
     public interface LibC {
         int killpg(int pgrp, int sig);
@@ -36,7 +33,6 @@ public class Process extends java.lang.Process {
 
     public Process(POSIX posix, long pid, int out, int in, int err) {
         libc = LibraryLoader.create(LibC.class).load("c");
-        //libc.setpgid((int)pid, (int)pid);
         this.posix = posix;
         this.pid = pid;
         this.out = new NativeDeviceChannel(NativeSelectorProvider.getInstance(), out, SelectionKey.OP_WRITE);
@@ -84,6 +80,9 @@ public class Process extends java.lang.Process {
         if(ret > 0) {
             exitcode = status[0];
         }
+        if(ret < 0) {
+            throw new RuntimeException(String.format("wait pid %s error", pid));
+        }
         return exitcode;
     }
 
@@ -96,8 +95,7 @@ public class Process extends java.lang.Process {
         return Long.valueOf(exitcode).intValue();
     }
 
-    @Override
-    public synchronized boolean  waitFor(long timeout, TimeUnit unit) throws InterruptedException {
+    public synchronized boolean waitFor(long timeout, TimeUnit unit) throws InterruptedException {
         if(exitcode != -1) {
             return true;
         }
